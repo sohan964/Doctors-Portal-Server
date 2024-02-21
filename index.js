@@ -6,6 +6,8 @@ const port = process.env.PORT || 5000;
 require('dotenv').config();
 const app = express();
 
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+
 //middleware
 app.use(cors());
 app.use(express.json());
@@ -56,6 +58,7 @@ async function run() {
     const bookingsCollection = client.db('doctorsPortal').collection('bookings');
     const usersCollection = client.db('doctorsPortal').collection('users');
     const doctorsCollection = client.db('doctorsPortal').collection('doctors');
+    const paymentsCollection = client.db('doctorsPortal').collection('payments');
 
     //it must have to execute after executing verifyJWT
     const verifyAdmin = async(req, res, next) =>{
@@ -141,6 +144,41 @@ async function run() {
       const result = await bookingsCollection.insertOne(booking);
       res.send(result);
     });
+
+    //for stripe payment
+    app.post("/create-payment-intent", async(req, res)=>{
+      const booking = req.body;
+      const price = booking.price;
+      const amount = price*100;
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        currency: "usd",
+        amount: amount,
+        "payment_method_types": [
+          "card",
+          "link"
+        ],
+      });
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    })
+
+    //store payment in database
+    app.post('/payments', async(req, res)=>{
+      const payment = req.body;
+      const result = await paymentsCollection.insertOne(payment);
+      const id = payment.bookingId;
+      const filter = {_id: new ObjectId(id)}
+      const updatedDoc ={
+        $set:{
+          paid: true,
+          transactionId: payment.transactionId,
+        }
+      }
+      const updatedResult = await bookingsCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    })
 
     //jwt
     app.get('/jwt', async (req, res) => {
